@@ -4,15 +4,23 @@ Painel preparado para rodar no Railway com **base compartilhada entre todos os u
 
 ## O que mudou nesta versão
 
-- Filtro por **dias sem movimentação desde o último bipe operacional**:
-  - informe apenas o mínimo para ver, por exemplo, todos com `5+ dias`;
-  - informe mínimo e máximo para uma faixa, por exemplo, `3 até 7 dias`;
-  - quando esse filtro é usado, entram apenas pedidos ainda não entregues/devolvidos e com data válida da última operação.
-- O upload de XLSX/CSV agora atualiza uma **base central no servidor**.
-- Pedidos repetidos são atualizados pelo **número do pedido**.
-- Quem abrir o site depois já recebe a versão mais recente da base.
-- Quem já estiver com o painel aberto verifica automaticamente se existe uma nova versão a cada 30 segundos e também ao voltar para a aba.
-- Botão **Sincronizar agora** para forçar uma atualização imediata.
+- O filtro principal de período agora usa **Hora de Envio** da planilha, com início e fim em data/hora.
+- Mantido o filtro por **dias sem movimentação desde o último bipe operacional**.
+- Nova aba **Base de Dados** para consultar as linhas carregadas no servidor.
+- Nova aba **Editar Base de Dados**:
+  - permite editar os campos das linhas;
+  - o número do pedido fica bloqueado porque é a chave de atualização;
+  - ao salvar, as alterações são gravadas na base compartilhada e ficam disponíveis para todos.
+- Novo botão **Exportar tabelas XLSX**. Ele gera um único arquivo com abas para:
+  - Pacotes;
+  - Resumo RM;
+  - Problemáticos RM;
+  - Base Própria x Franquia;
+  - Base de Dados.
+- Nova visão **Base Própria x Franquia**, separada em duas tabelas. A classificação usa a **Estação de Coleta** e considera franquia quando o nome começa com `F ` ou `F-`.
+- O campo **Hora de Envio** agora também é persistido no CSV central do backend.
+- O upload de XLSX/CSV atualiza uma **base central no servidor** e os pedidos repetidos são atualizados pelo **número do pedido**.
+- Quem abrir o site depois recebe a versão mais recente da base; painéis já abertos verificam atualizações automaticamente.
 
 ## Persistência obrigatória no Railway
 

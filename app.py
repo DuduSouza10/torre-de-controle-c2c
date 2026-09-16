@@ -16,7 +16,7 @@ INITIAL_DATA = ROOT / 'data' / 'initial_dataset.csv'
 MAX_UPLOAD_BYTES = int(os.environ.get('MAX_UPLOAD_MB', '50')) * 1024 * 1024
 
 FIELDNAMES = [
-    'rm', 'reg', 'pedido', 'coleta', 'estcol', 'tipo', 'oprec', 'horaop',
+    'rm', 'reg', 'pedido', 'coleta', 'estcol', 'envio', 'tipo', 'oprec', 'horaop',
     'baseent', 'uf', 'motivo', 'marca', 'transf', 'interceptado',
     'indenizado', 'finalizado'
 ]

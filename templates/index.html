@@ -85,7 +85,7 @@
   .controls-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;}
   .field{display:flex;flex-direction:column;gap:4px;}
   .field label{font-size:11px;color:var(--ink-soft);font-weight:600;}
-  .field select,.field input[type=date],.field input[type=text],.field input[type=number]{
+  .field select,.field input[type=date],.field input[type=datetime-local],.field input[type=text],.field input[type=number]{
     border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:13px;color:var(--ink);
     background:var(--floor);font-family:var(--sans);min-width:120px;
   }
@@ -158,6 +158,25 @@
   .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);scrollbar-gutter:stable;}
   #viewProblemsRM .table-wrap{padding-bottom:14px;}
   #viewProblemsRM #problemsRMTable{margin-bottom:2px;}
+  .view-tabs{flex-wrap:wrap;}
+  .section-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .export-btn,.save-btn{
+    border:1px solid var(--line);background:var(--paper);color:var(--ink);padding:8px 12px;border-radius:7px;
+    font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;
+  }
+  .export-btn:hover,.save-btn:hover{border-color:var(--red);color:var(--red-dark);}
+  .save-btn{background:var(--red);border-color:var(--red);color:#fff;}
+  .save-btn:hover{background:var(--red-dark);color:#fff;}
+  .dual-tables{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .subtable-title{font-size:13px;font-weight:800;margin:0 0 7px;color:var(--ink);}
+  .edit-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .edit-note{font-size:11.5px;color:var(--ink-soft);line-height:1.4;}
+  .edit-cell{width:100%;min-width:110px;border:1px solid transparent;border-radius:5px;padding:5px 6px;background:transparent;font:inherit;color:inherit;}
+  .edit-cell:focus{outline:none;border-color:var(--red);background:#fff;}
+  .edit-cell.dirty{border-color:var(--warn);background:var(--warn-tint);}
+  .edit-readonly{background:var(--floor);color:var(--ink-soft);}
+  #editTable{min-width:1900px;}
+  @media (max-width:1050px){.dual-tables{grid-template-columns:1fr;}}
   table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px;}
   thead th{
     background:var(--red-tint);color:var(--red-darker);text-align:left;padding:9px 10px;
@@ -288,6 +307,9 @@
       </div>
 
       <div class="upload-block">
+        <button class="upload-btn secondary" id="exportBtn" onclick="exportTablesXLSX()">
+          <span id="txt-export">⇩ Exportar tabelas XLSX</span>
+        </button>
         <button class="upload-btn secondary" id="clearBtn" onclick="syncSharedData(true)">
           <span id="txt-clear">↻ Sincronizar agora</span>
         </button>
@@ -320,6 +342,9 @@
         <button id="viewBtnPackages" class="active" onclick="setView('packages')" data-txt="txt-view-packages">Pacotes</button>
         <button id="viewBtnRM" onclick="setView('rm')" data-txt="txt-view-rm">Resumo por RM</button>
         <button id="viewBtnProblemsRM" onclick="setView('problemsRM')">Problemáticos por RM - Motivos da Anomalia</button>
+        <button id="viewBtnBases" onclick="setView('bases')">Base Própria x Franquia</button>
+        <button id="viewBtnData" onclick="setView('data')">Base de Dados</button>
+        <button id="viewBtnEdit" onclick="setView('edit')">Editar Base de Dados</button>
       </div>
     </div>
 
@@ -363,6 +388,59 @@
         </table>
       </div>
     </div>
+
+    <div id="viewBases" style="display:none;">
+      <div class="rm-context">
+        <div>
+          <div class="rm-title" id="txt-bases-title">BASE PRÓPRIA x FRANQUIA</div>
+          <div class="rm-sub" id="txt-bases-sub">Classificação pela Estação de Coleta: bases iniciadas por “F ” são consideradas franquias.</div>
+        </div>
+      </div>
+      <div class="dual-tables">
+        <div>
+          <div class="subtable-title" id="txt-own-base-title">Base Própria</div>
+          <div class="table-wrap">
+            <table id="ownBaseTable"><thead><tr id="ownBaseHead"></tr></thead><tbody id="ownBaseBody"></tbody></table>
+          </div>
+        </div>
+        <div>
+          <div class="subtable-title" id="txt-franchise-title">Franquia</div>
+          <div class="table-wrap">
+            <table id="franchiseTable"><thead><tr id="franchiseHead"></tr></thead><tbody id="franchiseBody"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="viewData" style="display:none;">
+      <div class="rm-context">
+        <div>
+          <div class="rm-title" id="txt-data-title">BASE DE DADOS</div>
+          <div class="rm-sub" id="txt-data-sub">Visualização das linhas carregadas na base compartilhada.</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="dataTable"><thead><tr id="dataHeadRow"></tr></thead><tbody id="dataBody"></tbody></table>
+      </div>
+      <div class="pager" id="dataPager"></div>
+    </div>
+
+    <div id="viewEdit" style="display:none;">
+      <div class="edit-toolbar">
+        <div>
+          <div class="rm-title" id="txt-edit-title">EDIÇÃO DA BASE DE DADOS</div>
+          <div class="edit-note" id="txt-edit-note">Edite as células e clique em Salvar alterações. O número do pedido é a chave e não pode ser alterado.</div>
+        </div>
+        <div class="section-actions">
+          <button class="export-btn" onclick="discardEdits()" id="btnDiscardEdits">Descartar alterações</button>
+          <button class="save-btn" onclick="saveEdits()" id="btnSaveEdits">Salvar alterações</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="editTable"><thead><tr id="editHeadRow"></tr></thead><tbody id="editBody"></tbody></table>
+      </div>
+      <div class="pager" id="editPager"></div>
+    </div>
   </div>
 
 </main>
@@ -389,19 +467,19 @@ const I18N = {
       <b>3.</b> O painel identifica a Regional (SPN/MG) automaticamente, envia as linhas ao servidor e mescla por número do pedido, atualizando pedidos repetidos.<br>
       <b>4.</b> A base é compartilhada: quando alguém envia um novo arquivo, os dados ficam disponíveis para todos que acessarem o site. Painéis já abertos verificam atualizações automaticamente.<br>
       <b>5.</b> Para manter os dados após reinícios/redeploys no Railway, monte um Volume em <b>/data</b>.<br>
-      <b>6.</b> O filtro "Sem movimentação desde o último bipe" usa o horário da última operação e considera apenas pacotes ainda não entregues/devolvidos.`,
+      <b>6.</b> O filtro de período usa a coluna <b>Hora de Envio</b>. O filtro "Sem movimentação desde o último bipe" usa o horário da última operação e considera apenas pacotes ainda não entregues/devolvidos.<br><b>7.</b> A aba "Editar Base de Dados" salva alterações diretamente na base compartilhada; o botão XLSX exporta todas as tabelas com os filtros atuais.`,
     regional:'Regional', daterange:'Coletado entre', quick:'Atalhos', rm:'RM', idleDays:'Sem movimentação desde o último bipe (dias)', search:'Buscar pedido',
     searchPh:'Número do pedido', onlyproblem:'Somente problemáticos',
-    clear:'↻ Sincronizar agora', upload:'⭱ Atualizar base compartilhada',
+    clear:'↻ Sincronizar agora', upload:'⭱ Atualizar base compartilhada', exportXlsx:'⇩ Exportar tabelas XLSX',
     totalLoaded:'Pedidos carregados', lastUpdate:'Última atualização dos dados', filteredCount:'Exibindo (com filtros)',
     all:'Todos', today:'Hoje', last7:'Últimos 7 dias', august:'Agosto/26', septemberT3:'Setembro (T-3)', allDates:'Tudo',
     kpiTotal:'Total de pacotes', kpiDelivered:'Entregues', kpiWaiting:'Na base, aguardando',
     kpiTransit:'Em trânsito', kpiStuck:'Parados +5 dias', kpiDamaged:'Avariados', kpiLost:'Extraviados', kpiReturned:'Devolvidos',
     stuckTitle:'Top 10 pacotes mais parados (sem movimentação)',
-    viewPackages:'Pacotes', viewRM:'Resumo por RM', viewProblemsRM:'Problemáticos por RM - Motivos da Anomalia',
-    problemsRMTitle:'PROBLEMÁTICOS POR RM · Motivos da Anomalia', problemsRMSub:'Somente bipes de pacote problemático · os motivos encontrados viram colunas automaticamente', problemsRMTotal:'TOTAL PROBLEMÁTICOS',
+    viewPackages:'Pacotes', viewRM:'Resumo por RM', viewProblemsRM:'Problemáticos por RM - Motivos da Anomalia', viewBases:'Base Própria x Franquia', viewData:'Base de Dados', viewEdit:'Editar Base de Dados',
+    problemsRMTitle:'PROBLEMÁTICOS POR RM · Motivos da Anomalia', problemsRMSub:'Somente bipes de pacote problemático · os motivos encontrados viram colunas automaticamente', problemsRMTotal:'TOTAL PROBLEMÁTICOS', basesTitle:'BASE PRÓPRIA x FRANQUIA', basesSub:'Classificação pela Estação de Coleta: bases iniciadas por “F ” são consideradas franquias.', ownBaseTitle:'Base Própria', franchiseTitle:'Franquia', dataTitle:'BASE DE DADOS', dataSub:'Visualização das linhas carregadas na base compartilhada.', editTitle:'EDIÇÃO DA BASE DE DADOS', editNote:'Edite as células e clique em Salvar alterações. O número do pedido é a chave e não pode ser alterado.', saveEdits:'Salvar alterações', discardEdits:'Descartar alterações',
     footer:'TORRE DE CONTROLE - C2C · base compartilhada centralmente pelo servidor do painel.',
-    colPedido:'Pedido', colRM:'RM', colReg:'Regional', colColeta:'Coletado em', colEstCol:'Estação de coleta',
+    colPedido:'Pedido', colRM:'RM', colReg:'Regional', colColeta:'Coletado em', colEnvio:'Hora de Envio', colEstCol:'Estação de coleta',
     colTipo:'Tipo últ. operação', colOpRec:'Operação mais recente', colBaseEnt:'Base de entrega',
     colMatch:'Na base de entrega?', colHoraOp:'Horário últ. operação', colIdle:'Parado há', colUF:'UF destino',
     colStatus:'Status', colMotivo:'Motivo anomalia',
@@ -429,18 +507,18 @@ const I18N = {
       <b>4.</b> 数据库为共享模式：任何人上传新文件后，所有访问该网站的人都会看到更新；已打开的页面也会自动检查更新。<br>
       <b>5.</b> 为了在 Railway 重启或重新部署后保留数据，请将 Volume 挂载到 <b>/data</b>。<br>
       <b>6.</b> "距最后一次操作扫描无更新"筛选使用最近操作时间，并仅筛选尚未签收/退回的包裹。`,
-    regional:'大区', daterange:'揽收日期区间', quick:'快捷选项', rm:'区域负责人 (RM)', idleDays:'距最后一次操作扫描无更新（天）', search:'搜索订单号',
+    regional:'大区', daterange:'采集时间区间', quick:'快捷选项', rm:'区域负责人 (RM)', idleDays:'距最后一次操作扫描无更新（天）', search:'搜索订单号',
     searchPh:'订单号', onlyproblem:'仅显示问题件',
-    clear:'↻ 立即同步', upload:'⭱ 更新共享数据库',
+    clear:'↻ 立即同步', upload:'⭱ 更新共享数据库', exportXlsx:'⇩ 导出表格 XLSX',
     totalLoaded:'已加载订单数', lastUpdate:'数据最后更新时间', filteredCount:'当前筛选显示',
     all:'全部', today:'今天', last7:'最近7天', august:'8月/26', septemberT3:'9月 (T-3)', allDates:'全部日期',
     kpiTotal:'包裹总数', kpiDelivered:'已签收', kpiWaiting:'已到派送网点待签收',
     kpiTransit:'运输中', kpiStuck:'停滞超过5天', kpiDamaged:'破损件', kpiLost:'遗失件', kpiReturned:'退件',
     stuckTitle:'停滞时间最长的10个包裹',
-    viewPackages:'包裹明细', viewRM:'按RM汇总', viewProblemsRM:'按RM问题件 - 异常原因',
-    problemsRMTitle:'按RM问题件 · 异常原因', problemsRMSub:'仅统计问题件扫描 · 检测到的异常原因会自动生成列', problemsRMTotal:'问题件合计',
+    viewPackages:'包裹明细', viewRM:'按RM汇总', viewProblemsRM:'按RM问题件 - 异常原因', viewBases:'直营网点 x 加盟网点', viewData:'数据库', viewEdit:'编辑数据库',
+    problemsRMTitle:'按RM问题件 · 异常原因', problemsRMSub:'仅统计问题件扫描 · 检测到的异常原因会自动生成列', problemsRMTotal:'问题件合计', basesTitle:'直营网点 x 加盟网点', basesSub:'按揽收网点分类：以“F ”开头的网点视为加盟网点。', ownBaseTitle:'直营网点', franchiseTitle:'加盟网点', dataTitle:'数据库', dataSub:'查看共享数据库中已加载的全部记录。', editTitle:'编辑数据库', editNote:'编辑单元格后点击保存。订单号是唯一键，不能修改。', saveEdits:'保存修改', discardEdits:'放弃修改',
     footer:'TORRE DE CONTROLE - C2C · 数据由面板服务器集中共享。',
-    colPedido:'订单号', colRM:'RM', colReg:'大区', colColeta:'揽收时间', colEstCol:'揽收网点',
+    colPedido:'订单号', colRM:'RM', colReg:'大区', colColeta:'揽收时间', colEnvio:'发送时间', colEstCol:'揽收网点',
     colTipo:'最近操作类型', colOpRec:'当前所在网点', colBaseEnt:'派送网点',
     colMatch:'是否已到派送网点', colHoraOp:'最近操作时间', colIdle:'停滞时长', colUF:'目的州',
     colStatus:'状态', colMotivo:'异常原因',
@@ -497,7 +575,11 @@ let currentView = 'packages';
 let sortKey = 'idleMs';
 let sortDir = 'desc';
 let pkgPage = 1;
+let editPage = 1;
+let dataPage = 1;
 const PAGE_SIZE = 50;
+const EDIT_PAGE_SIZE = 35;
+const EDIT_DRAFTS = new Map();
 let refTime = new Date();
 
 const CANON_MAP = {
@@ -529,9 +611,20 @@ function normHeader(h){
 function parseDate(str){
   if(!str) return null;
   const s = str.toString().trim();
-  if(!/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
-  const d = new Date(s.replace(' ','T'));
-  return isNaN(d.getTime()) ? null : d;
+  let d = null;
+  if(/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/.test(s)){
+    d = new Date(s.replace(/\//g,'-').replace(' ','T'));
+  } else {
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if(m){
+      let y=Number(m[3]); if(y<100) y+=2000;
+      d = new Date(y, Number(m[2])-1, Number(m[1]), Number(m[4]||0), Number(m[5]||0), Number(m[6]||0));
+    } else {
+      const parsed = new Date(s);
+      if(!isNaN(parsed.getTime())) d = parsed;
+    }
+  }
+  return d && !isNaN(d.getTime()) ? d : null;
 }
 function normStr(s){ return (s||'').toString().trim().toLowerCase(); }
 
@@ -542,6 +635,7 @@ function buildRecord(raw){
     pedido:(raw.pedido||'').toString().trim(),
     coletaRaw:(raw.coleta||'').toString().trim(),
     estcol:(raw.estcol||'').toString().trim(),
+    envioRaw:(raw.envio||'').toString().trim(),
     tipo:(raw.tipo||'').toString().trim(),
     oprec:(raw.oprec||'').toString().trim(),
     horaopRaw:(raw.horaop||'').toString().trim(),
@@ -555,6 +649,7 @@ function buildRecord(raw){
     finalRaw:(raw.finalRaw||'').toString().trim(),
   };
   r.coletaDate = parseDate(r.coletaRaw);
+  r.envioDate = parseDate(r.envioRaw);
   r.horaopDate = parseDate(r.horaopRaw);
   r.delivered = /assinatura de encomenda/i.test(r.tipo);
   r.returned = /devolu/i.test(r.marca) || /devolu/i.test(r.tipo);
@@ -623,8 +718,8 @@ function mergeRows(rawRows){
 }
 
 function rowsToCSV(rows){
-  const cols = ['rm','reg','pedido','coletaRaw','estcol','tipo','oprec','horaopRaw','baseent','uf','motivo','marca','transf','interceptRaw','indenRaw','finalRaw'];
-  const header = ['rm','reg','pedido','coleta','estcol','tipo','oprec','horaop','baseent','uf','motivo','marca','transf','interceptado','indenizado','finalizado'];
+  const cols = ['rm','reg','pedido','coletaRaw','estcol','envioRaw','tipo','oprec','horaopRaw','baseent','uf','motivo','marca','transf','interceptRaw','indenRaw','finalRaw'];
+  const header = ['rm','reg','pedido','coleta','estcol','envio','tipo','oprec','horaop','baseent','uf','motivo','marca','transf','interceptado','indenizado','finalizado'];
   const esc = v => {
     v = (v===undefined||v===null) ? '' : String(v);
     return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
@@ -789,8 +884,9 @@ function filteredRows(){
   const toD = to ? new Date(to+'T23:59:59') : null;
   return ALL_ROWS.filter(r=>{
     if(currentRegional!=='ALL' && r.reg!==currentRegional) return false;
-    if(fromD && (!r.coletaDate || r.coletaDate < fromD)) return false;
-    if(toD && (!r.coletaDate || r.coletaDate > toD)) return false;
+    const periodDate = r.envioDate; // o filtro visual continua sendo de data, mas usa exclusivamente a coluna Hora de Envio
+    if(fromD && (!periodDate || periodDate < fromD)) return false;
+    if(toD && (!periodDate || periodDate > toD)) return false;
     if(rm && r.rm!==rm) return false;
     if(search && !r.pedido.includes(search)) return false;
     if(onlyProblem && !['problem','lost','damaged'].includes(r.status)) return false;
@@ -863,6 +959,7 @@ function applyStaticText(){
   document.getElementById('txt-onlyproblem').textContent = t('onlyproblem');
   document.getElementById('txt-clear').textContent = t('clear');
   document.getElementById('txt-upload').textContent = t('upload');
+  document.getElementById('txt-export').textContent = t('exportXlsx');
   document.getElementById('txt-total-loaded').firstChild.textContent = t('totalLoaded')+': ';
   document.getElementById('txt-last-update').firstChild.textContent = t('lastUpdate')+': ';
   document.getElementById('txt-filtered-count').firstChild.textContent = t('filteredCount')+': ';
@@ -870,8 +967,21 @@ function applyStaticText(){
   document.getElementById('viewBtnPackages').textContent = t('viewPackages');
   document.getElementById('viewBtnRM').textContent = t('viewRM');
   document.getElementById('viewBtnProblemsRM').textContent = t('viewProblemsRM');
+  document.getElementById('viewBtnBases').textContent = t('viewBases');
+  document.getElementById('viewBtnData').textContent = t('viewData');
+  document.getElementById('viewBtnEdit').textContent = t('viewEdit');
   document.getElementById('txt-problems-rm-title').textContent = t('problemsRMTitle');
   document.getElementById('txt-problems-rm-sub').textContent = t('problemsRMSub');
+  document.getElementById('txt-bases-title').textContent = t('basesTitle');
+  document.getElementById('txt-bases-sub').textContent = t('basesSub');
+  document.getElementById('txt-own-base-title').textContent = t('ownBaseTitle');
+  document.getElementById('txt-franchise-title').textContent = t('franchiseTitle');
+  document.getElementById('txt-data-title').textContent = t('dataTitle');
+  document.getElementById('txt-data-sub').textContent = t('dataSub');
+  document.getElementById('txt-edit-title').textContent = t('editTitle');
+  document.getElementById('txt-edit-note').textContent = t('editNote');
+  document.getElementById('btnSaveEdits').textContent = t('saveEdits');
+  document.getElementById('btnDiscardEdits').textContent = t('discardEdits');
   document.getElementById('txt-footer').textContent = t('footer');
   document.getElementById('txt-rm-summary-title').textContent = t('rmSummaryTitle');
   document.getElementById('txt-rm-data-note').textContent = t('rmDataNote');
@@ -890,13 +1000,13 @@ function buildRegionalTabs(){
   const allBtn = document.createElement('button');
   allBtn.className = 'rtab' + (currentRegional==='ALL'?' active':'');
   allBtn.textContent = t('all');
-  allBtn.onclick = ()=>{ currentRegional='ALL'; pkgPage=1; render(); };
+  allBtn.onclick = ()=>{ currentRegional='ALL'; pkgPage=1; editPage=1; dataPage=1; render(); };
   wrap.appendChild(allBtn);
   REGIONS.forEach(reg=>{
     const b = document.createElement('button');
     b.className = 'rtab' + (currentRegional===reg?' active':'');
     b.textContent = reg;
-    b.onclick = ()=>{ currentRegional=reg; pkgPage=1; render(); };
+    b.onclick = ()=>{ currentRegional=reg; pkgPage=1; editPage=1; dataPage=1; render(); };
     wrap.appendChild(b);
   });
 }
@@ -916,7 +1026,7 @@ function setQuickRange(kind){
     to.value=iso(cut);
   }
   else if(kind==='all'){ from.value=''; to.value=''; }
-  pkgPage=1; render();
+  pkgPage=1; editPage=1; dataPage=1; render();
 }
 function buildQuickButtons(){
   const wrap = document.getElementById('quickBtns');
@@ -947,9 +1057,15 @@ function setView(v){
   document.getElementById('viewBtnPackages').classList.toggle('active', v==='packages');
   document.getElementById('viewBtnRM').classList.toggle('active', v==='rm');
   document.getElementById('viewBtnProblemsRM').classList.toggle('active', v==='problemsRM');
+  document.getElementById('viewBtnBases').classList.toggle('active', v==='bases');
+  document.getElementById('viewBtnData').classList.toggle('active', v==='data');
+  document.getElementById('viewBtnEdit').classList.toggle('active', v==='edit');
   document.getElementById('viewPackages').style.display = v==='packages' ? '' : 'none';
   document.getElementById('viewRM').style.display = v==='rm' ? '' : 'none';
   document.getElementById('viewProblemsRM').style.display = v==='problemsRM' ? '' : 'none';
+  document.getElementById('viewBases').style.display = v==='bases' ? '' : 'none';
+  document.getElementById('viewData').style.display = v==='data' ? '' : 'none';
+  document.getElementById('viewEdit').style.display = v==='edit' ? '' : 'none';
   render();
 }
 
@@ -994,7 +1110,7 @@ function renderStuckList(rows){
 }
 
 const PKG_COLS = [
-  ['pedido','colPedido'], ['rm','colRM'], ['reg','colReg'], ['coletaDate','colColeta'],
+  ['pedido','colPedido'], ['rm','colRM'], ['reg','colReg'], ['coletaDate','colColeta'], ['envioDate','colEnvio'],
   ['estcol','colEstCol'], ['tipo','colTipo'], ['oprec','colOpRec'], ['baseent','colBaseEnt'],
   ['matchBase','colMatch'], ['horaopDate','colHoraOp'], ['idleMs','colIdle'], ['uf','colUF'],
   ['status','colStatus'], ['motivo','colMotivo'],
@@ -1021,6 +1137,7 @@ function renderPkgTable(rows){
         <td>${escapeHtml(r.rm)}</td>
         <td>${escapeHtml(r.reg)}</td>
         <td>${r.coletaDate?fmtDate(r.coletaDate):('<span class="idle-warn">'+t('invalidDate')+'</span>')}</td>
+        <td>${r.envioDate?fmtDate(r.envioDate):('<span class="idle-warn">'+t('invalidDate')+'</span>')}</td>
         <td>${escapeHtml(r.estcol)}</td>
         <td>${escapeHtml(trEnum('tipo', r.tipo))}</td>
         <td>${escapeHtml(r.oprec)}</td>
@@ -1108,7 +1225,7 @@ function renderRMTable(rows){
   }
 
   const f = getFilters();
-  const fmtBR = v=>v ? v.split('-').reverse().join('/') : '—';
+  const fmtBR = v=>{ if(!v) return '—'; const d=new Date(v); return isNaN(d.getTime())?v:d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); };
   document.getElementById('txt-rm-summary-period').textContent = t('rmSummaryPeriod')
     .replace('{from}',fmtBR(f.from)).replace('{to}',fmtBR(f.to));
 }
@@ -1174,6 +1291,160 @@ function renderProblemsRMTable(rows){
     </tr>`;
 }
 
+function isFranchiseBase(name){
+  return /^F(?:\s|-)/i.test((name||'').trim());
+}
+
+function buildBaseGroups(rows, franchise){
+  const groups = new Map();
+  rows.forEach(r=>{
+    const base=(r.estcol||'').trim();
+    if(!base || isFranchiseBase(base)!==franchise) return;
+    const key=[base,r.reg,r.rm].join('|');
+    if(!groups.has(key)) groups.set(key,{base,reg:r.reg,rm:r.rm,total:0,entregues:0,naoEntregues:0,problematicos:0,parados5d:0});
+    const g=groups.get(key);
+    g.total++;
+    if(r.delivered) g.entregues++; else g.naoEntregues++;
+    if(['problem','lost','damaged'].includes(r.status)) g.problematicos++;
+    if(!r.delivered && !r.returned && r.idleMs!==null && r.idleMs>=5*86400000) g.parados5d++;
+  });
+  return [...groups.values()].sort((a,b)=>b.total-a.total || a.base.localeCompare(b.base));
+}
+
+function renderBaseGroupTable(headId, bodyId, list){
+  const labels=['Base','Regional','RM','Total','Entregues','Não entregues','Problemáticos','+5 dias sem atualização'];
+  document.getElementById(headId).innerHTML=labels.map(x=>`<th>${escapeHtml(x)}</th>`).join('');
+  const body=document.getElementById(bodyId);
+  if(!list.length){ body.innerHTML=`<tr><td colspan="8"><div class="empty-state">${t('noData')}</div></td></tr>`; return; }
+  const tot={total:0,entregues:0,naoEntregues:0,problematicos:0,parados5d:0};
+  list.forEach(g=>Object.keys(tot).forEach(k=>tot[k]+=g[k]));
+  body.innerHTML=list.map(g=>`<tr><td>${escapeHtml(g.base)}</td><td>${escapeHtml(g.reg)}</td><td>${escapeHtml(g.rm)}</td><td class="mono">${g.total}</td><td class="mono">${g.entregues}</td><td class="mono">${g.naoEntregues}</td><td class="mono">${g.problematicos}</td><td class="mono">${g.parados5d}</td></tr>`).join('')+
+    `<tr style="font-weight:800;background:var(--floor)"><td colspan="3">${t('rmTotal')}</td><td class="mono">${tot.total}</td><td class="mono">${tot.entregues}</td><td class="mono">${tot.naoEntregues}</td><td class="mono">${tot.problematicos}</td><td class="mono">${tot.parados5d}</td></tr>`;
+}
+
+function renderBaseTypeTables(rows){
+  renderBaseGroupTable('ownBaseHead','ownBaseBody',buildBaseGroups(rows,false));
+  renderBaseGroupTable('franchiseHead','franchiseBody',buildBaseGroups(rows,true));
+}
+
+const DATA_FIELDS=[
+  ['rm','RM'],['reg','Regional'],['pedido','Pedido'],['coleta','Tempo de Coleta'],['estcol','Estação de Coleta'],['envio','Hora de Envio'],
+  ['tipo','Tipo da Última Operação'],['oprec','Operação Mais Recente'],['horaop','Horário da Última Operação'],['baseent','Base de Entrega'],
+  ['uf','UF Destino'],['motivo','Motivos da Anomalia'],['marca','Marca de Assinatura'],['transf','Transferência/Devolução'],
+  ['interceptado','Interceptado'],['indenizado','Indenizado'],['finalizado','Finalizado']
+];
+
+function renderDataTable(rows){
+  document.getElementById('dataHeadRow').innerHTML=DATA_FIELDS.map(([_,label])=>`<th>${escapeHtml(label)}</th>`).join('');
+  const sorted=[...rows].sort((a,b)=>a.pedido.localeCompare(b.pedido));
+  const totalPages=Math.max(1,Math.ceil(sorted.length/PAGE_SIZE));
+  if(dataPage>totalPages) dataPage=totalPages;
+  const pageRows=sorted.slice((dataPage-1)*PAGE_SIZE,dataPage*PAGE_SIZE);
+  const body=document.getElementById('dataBody');
+  if(!pageRows.length){body.innerHTML=`<tr><td colspan="${DATA_FIELDS.length}"><div class="empty-state">${t('noData')}</div></td></tr>`;}
+  else body.innerHTML=pageRows.map(r=>{const raw=recordToEditRaw(r);return `<tr>${DATA_FIELDS.map(([field])=>`<td>${escapeHtml(raw[field]??'')}</td>`).join('')}</tr>`;}).join('');
+  document.getElementById('dataPager').innerHTML=`<button onclick="changeDataPage(-1)" ${dataPage<=1?'disabled':''}>${t('prev')}</button><span>${t('pageOf').replace('{p}',dataPage).replace('{t}',totalPages)} · ${sorted.length.toLocaleString('pt-BR')} linha(s)</span><button onclick="changeDataPage(1)" ${dataPage>=totalPages?'disabled':''}>${t('next')}</button>`;
+}
+function changeDataPage(delta){ dataPage+=delta; render(); }
+
+const EDIT_FIELDS=[
+  ['rm','RM'],['reg','Regional'],['pedido','Pedido'],['coleta','Tempo de Coleta'],['estcol','Estação de Coleta'],['envio','Hora de Envio'],
+  ['tipo','Tipo da Última Operação'],['oprec','Operação Mais Recente'],['horaop','Horário da Última Operação'],['baseent','Base de Entrega'],
+  ['uf','UF Destino'],['motivo','Motivos da Anomalia'],['marca','Marca de Assinatura'],['transf','Transferência/Devolução'],
+  ['interceptado','Interceptado'],['indenizado','Indenizado'],['finalizado','Finalizado']
+];
+
+function recordToEditRaw(r){
+  return {rm:r.rm,reg:r.reg,pedido:r.pedido,coleta:r.coletaRaw,estcol:r.estcol,envio:r.envioRaw,tipo:r.tipo,oprec:r.oprec,horaop:r.horaopRaw,baseent:r.baseent,uf:r.uf,motivo:r.motivo,marca:r.marca,transf:r.transf,interceptado:r.interceptRaw,indenizado:r.indenRaw,finalizado:r.finalRaw};
+}
+
+function editValue(pedido,field,r){
+  const d=EDIT_DRAFTS.get(pedido);
+  return d ? (d[field]??'') : (recordToEditRaw(r)[field]??'');
+}
+
+function updateEditDraft(pedido,field,value,el){
+  const row=ALL_ROWS.find(r=>r.pedido===pedido);
+  if(!row) return;
+  const d=EDIT_DRAFTS.get(pedido) || recordToEditRaw(row);
+  d[field]=value;
+  EDIT_DRAFTS.set(pedido,d);
+  if(el) el.classList.add('dirty');
+}
+
+function renderEditTable(rows){
+  const head=document.getElementById('editHeadRow');
+  head.innerHTML=EDIT_FIELDS.map(([_,label])=>`<th>${escapeHtml(label)}</th>`).join('');
+  const sorted=[...rows].sort((a,b)=>a.pedido.localeCompare(b.pedido));
+  const totalPages=Math.max(1,Math.ceil(sorted.length/EDIT_PAGE_SIZE));
+  if(editPage>totalPages) editPage=totalPages;
+  const pageRows=sorted.slice((editPage-1)*EDIT_PAGE_SIZE,editPage*EDIT_PAGE_SIZE);
+  const body=document.getElementById('editBody');
+  if(!pageRows.length){body.innerHTML=`<tr><td colspan="${EDIT_FIELDS.length}"><div class="empty-state">${t('noData')}</div></td></tr>`;}
+  else body.innerHTML=pageRows.map(r=>`<tr>${EDIT_FIELDS.map(([field])=>{
+    const val=editValue(r.pedido,field,r);
+    const ro=field==='pedido';
+    return `<td><input class="edit-cell ${ro?'edit-readonly':''} ${EDIT_DRAFTS.has(r.pedido)?'dirty':''}" ${ro?'readonly':''} value="${escapeHtml(val)}" ${ro?'':`oninput="updateEditDraft('${escapeHtml(r.pedido)}','${field}',this.value,this)"`}></td>`;
+  }).join('')}</tr>`).join('');
+  document.getElementById('editPager').innerHTML=`<button onclick="changeEditPage(-1)" ${editPage<=1?'disabled':''}>${t('prev')}</button><span>${t('pageOf').replace('{p}',editPage).replace('{t}',totalPages)} · ${EDIT_DRAFTS.size} alteração(ões) pendente(s)</span><button onclick="changeEditPage(1)" ${editPage>=totalPages?'disabled':''}>${t('next')}</button>`;
+}
+
+function changeEditPage(delta){ editPage+=delta; render(); }
+function discardEdits(){ EDIT_DRAFTS.clear(); render(); }
+async function saveEdits(){
+  if(!EDIT_DRAFTS.size){ alert(LANG==='pt'?'Nenhuma alteração pendente.':'没有待保存的修改。'); return; }
+  try{
+    const records=[...EDIT_DRAFTS.values()].map(raw=>buildRecord({
+      rm:raw.rm,reg:raw.reg,pedido:raw.pedido,coleta:raw.coleta,estcol:raw.estcol,envio:raw.envio,tipo:raw.tipo,oprec:raw.oprec,horaop:raw.horaop,baseent:raw.baseent,uf:raw.uf,motivo:raw.motivo,marca:raw.marca,transf:raw.transf,interceptRaw:raw.interceptado,indenRaw:raw.indenizado,finalRaw:raw.finalizado
+    }));
+    await uploadSharedRecords(records);
+    EDIT_DRAFTS.clear();
+    await loadSharedData();
+    render();
+    alert(LANG==='pt'?'Alterações salvas na base compartilhada.':'修改已保存到共享数据库。');
+  }catch(e){ alert((LANG==='pt'?'Erro ao salvar alterações: ':'保存修改失败：')+e.message); }
+}
+
+function packageExportRows(rows){
+  return rows.map(r=>({
+    'Pedido':r.pedido,'RM':r.rm,'Regional':r.reg,'Tempo de Coleta':r.coletaRaw,'Estação de Coleta':r.estcol,'Hora de Envio':r.envioRaw,
+    'Tipo Última Operação':r.tipo,'Operação Mais Recente':r.oprec,'Horário Última Operação':r.horaopRaw,'Base de Entrega':r.baseent,
+    'UF':r.uf,'Status':t(statusMeta(r.status).key),'Parado há':fmtIdle(r.idleMs),'Motivo Anomalia':normalizeProblemReason(r.motivo),'Marca':r.marca
+  }));
+}
+
+function rmSummaryExport(rows){
+  const groups=new Map();
+  rows.forEach(r=>{const key=r.rm+'|'+r.reg;if(!groups.has(key))groups.set(key,{RM:r.rm,Regional:r.reg,'Total coletados':0,'Entregues':0,'Não entregues':0,'Interceptados':0,'Avaria':0,'Extraviados':0,'Indenizados / finalizados':0,'+5 dias sem atualização':0});const g=groups.get(key);g['Total coletados']++;if(r.delivered)g['Entregues']++;else g['Não entregues']++;if(r.interceptado)g['Interceptados']++;if(r.avariado)g['Avaria']++;if(r.extraviado)g['Extraviados']++;if(r.indenizadoFinalizado)g['Indenizados / finalizados']++;if(!r.delivered&&!r.returned&&r.idleMs!==null&&r.idleMs>5*86400000)g['+5 dias sem atualização']++;});
+  return [...groups.values()].sort((a,b)=>b['Total coletados']-a['Total coletados']);
+}
+
+function problemsExport(rows){
+  const problemRows=rows.filter(r=>isProblemScan(r)&&normalizeProblemReason(r.motivo));
+  const reasons=[...new Set(problemRows.map(r=>normalizeProblemReason(r.motivo)))].sort();
+  const groups=new Map();
+  problemRows.forEach(r=>{const key=r.rm+'|'+r.reg;if(!groups.has(key))groups.set(key,{RM:r.rm,Regional:r.reg,'TOTAL PROBLEMÁTICOS':0});const g=groups.get(key);const reason=normalizeProblemReason(r.motivo);g[reason]=(g[reason]||0)+1;g['TOTAL PROBLEMÁTICOS']++;});
+  return [...groups.values()].map(g=>{const o={RM:g.RM,Regional:g.Regional};reasons.forEach(x=>o[x]=g[x]||0);o['TOTAL PROBLEMÁTICOS']=g['TOTAL PROBLEMÁTICOS'];return o;});
+}
+
+function basesExport(rows){
+  const convert=(franchise)=>buildBaseGroups(rows,franchise).map(g=>({'Tipo':franchise?'Franquia':'Base Própria','Base':g.base,'Regional':g.reg,'RM':g.rm,'Total':g.total,'Entregues':g.entregues,'Não entregues':g.naoEntregues,'Problemáticos':g.problematicos,'+5 dias sem atualização':g.parados5d}));
+  return [...convert(false),...convert(true)];
+}
+
+function exportTablesXLSX(){
+  const rows=filteredRows();
+  const wb=XLSX.utils.book_new();
+  const append=(name,data)=>{const ws=XLSX.utils.json_to_sheet(data.length?data:[{'Sem dados':''}]);XLSX.utils.book_append_sheet(wb,ws,name.slice(0,31));};
+  append('Pacotes',packageExportRows(rows));
+  append('Resumo RM',rmSummaryExport(rows));
+  append('Problemáticos RM',problemsExport(rows));
+  append('Base Própria x Franquia',basesExport(rows));
+  append('Base de Dados',rows.map(recordToEditRaw));
+  const stamp=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,`torre_controle_c2c_${stamp}.xlsx`);
+}
+
 function render(){
   buildRegionalTabs();
   buildRMFilterOptions();
@@ -1185,6 +1456,9 @@ function render(){
   if(currentView==='packages') renderPkgTable(rows);
   else if(currentView==='rm') renderRMTable(rows);
   else if(currentView==='problemsRM') renderProblemsRMTable(rows);
+  else if(currentView==='bases') renderBaseTypeTables(rows);
+  else if(currentView==='data') renderDataTable(rows);
+  else if(currentView==='edit') renderEditTable(rows);
 }
 </script>
 <script>
@@ -1198,13 +1472,13 @@ async function init(){
   const cutT3 = new Date(now); cutT3.setDate(cutT3.getDate()-3);
   document.getElementById('dateTo').value = `${cutT3.getFullYear()}-${pad(cutT3.getMonth()+1)}-${pad(cutT3.getDate())}`;
 
-  document.getElementById('dateFrom').addEventListener('change', ()=>{pkgPage=1; render();});
-  document.getElementById('dateTo').addEventListener('change', ()=>{pkgPage=1; render();});
-  document.getElementById('rmFilter').addEventListener('change', ()=>{pkgPage=1; render();});
-  document.getElementById('idleDaysMin').addEventListener('input', ()=>{pkgPage=1; render();});
-  document.getElementById('idleDaysMax').addEventListener('input', ()=>{pkgPage=1; render();});
-  document.getElementById('searchBox').addEventListener('input', ()=>{pkgPage=1; render();});
-  document.getElementById('onlyProblem').addEventListener('change', ()=>{pkgPage=1; render();});
+  document.getElementById('dateFrom').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('dateTo').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('rmFilter').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('idleDaysMin').addEventListener('input', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('idleDaysMax').addEventListener('input', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('searchBox').addEventListener('input', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
+  document.getElementById('onlyProblem').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
   document.getElementById('refTimeInput').addEventListener('change', (e)=>{
     refTime = new Date(e.target.value);
     recomputeDerived();
