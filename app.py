@@ -103,16 +103,51 @@ def write_meta(count: int, source: str = 'upload'):
 
 def ensure_shared_dataset():
     with DATA_LOCK:
+        initial_rows = read_csv_rows(INITIAL_DATA) if INITIAL_DATA.exists() else []
+
         if STATE_CSV.exists():
+            current_rows = read_csv_rows(STATE_CSV)
+
+            # Railway Volumes survive redeploys. Older deployments could have
+            # persisted only MG, so a new image containing MG + SPN would still
+            # keep serving the old MG-only CSV. Reconcile the bundled snapshot
+            # by adding only orders that are missing from the persistent base.
+            # Existing/shared records always win, so newer uploads/edits are not
+            # overwritten by the bundled snapshot.
+            if initial_rows:
+                current_by_id = {
+                    (row.get('pedido') or '').strip(): row
+                    for row in current_rows
+                    if (row.get('pedido') or '').strip()
+                }
+                added = 0
+                for row in initial_rows:
+                    pedido = (row.get('pedido') or '').strip()
+                    if pedido and pedido not in current_by_id:
+                        current_by_id[pedido] = row
+                        added += 1
+
+                if added:
+                    current_rows = list(current_by_id.values())
+                    write_csv_rows(STATE_CSV, current_rows)
+                    write_meta(len(current_rows), source='startup-reconcile')
+                    print(
+                        f'Reconciliação inicial: {added} pedidos ausentes adicionados '
+                        f'(regionais presentes: {sorted({(r.get("reg") or "").strip().upper() for r in current_rows if (r.get("reg") or "").strip()})}).',
+                        flush=True,
+                    )
+                    return
+
             if not STATE_META.exists():
-                write_meta(len(read_csv_rows(STATE_CSV)), source='recovered')
+                write_meta(len(current_rows), source='recovered')
             return
-        if not INITIAL_DATA.exists():
+
+        if not initial_rows:
             write_csv_rows(STATE_CSV, [])
             write_meta(0, source='empty')
             return
+
         # Normalize the embedded snapshot into the shared schema on first startup.
-        initial_rows = read_csv_rows(INITIAL_DATA)
         write_csv_rows(STATE_CSV, initial_rows)
         write_meta(len(initial_rows), source='initial')
 

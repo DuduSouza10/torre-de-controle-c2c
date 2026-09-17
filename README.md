@@ -81,3 +81,7 @@ Localmente, se `DATA_DIR` não for definido, os dados são gravados em `data/run
 ## Observação sobre concorrência
 
 O servidor usa lock durante a atualização e gravação atômica do CSV/metadata, evitando que dois uploads simultâneos corrompam a base.
+
+## Correção MG + SPN
+
+O servidor reconcilia a base persistida do Railway Volume com o snapshot inicial no startup. Isso corrige deployments antigos cujo `shared_dataset.csv` tenha ficado apenas com MG: pedidos ausentes de SPN são adicionados sem sobrescrever pedidos já atualizados no Volume.
