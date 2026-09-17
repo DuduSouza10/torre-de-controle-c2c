@@ -4,7 +4,7 @@ Painel preparado para rodar no Railway com **base compartilhada entre todos os u
 
 ## O que mudou nesta versão
 
-- O filtro principal de período agora usa **Hora de Envio** da planilha, com início e fim em data/hora.
+- O filtro principal de período possui um dropdown **Filtrar data por** com duas opções: **Coletado em** (coluna F) e **Hora de Envio** (coluna G). A faixa de datas usa exclusivamente a opção selecionada.
 - Mantido o filtro por **dias sem movimentação desde o último bipe operacional**.
 - Nova aba **Base de Dados** para consultar as linhas carregadas no servidor.
 - Nova aba **Editar Base de Dados**:

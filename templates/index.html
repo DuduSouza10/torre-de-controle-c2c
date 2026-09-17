@@ -270,7 +270,15 @@
       </div>
 
       <div class="field">
-        <label id="txt-daterange">Coletado entre</label>
+        <label id="txt-date-source">Filtrar data por</label>
+        <select id="dateSource">
+          <option value="coleta">Coletado em</option>
+          <option value="envio">Hora de Envio</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label id="txt-daterange">Período</label>
         <div style="display:flex;gap:6px;align-items:center;">
           <input type="date" id="dateFrom">
           <span style="color:var(--ink-soft);">–</span>
@@ -469,8 +477,8 @@ const I18N = {
       <b>3.</b> O painel identifica a Regional (SPN/MG) automaticamente, envia as linhas ao servidor e mescla por número do pedido, atualizando pedidos repetidos.<br>
       <b>4.</b> A base é compartilhada: quando alguém envia um novo arquivo, os dados ficam disponíveis para todos que acessarem o site. Painéis já abertos verificam atualizações automaticamente.<br>
       <b>5.</b> Para manter os dados após reinícios/redeploys no Railway, monte um Volume em <b>/data</b>.<br>
-      <b>6.</b> O filtro de período usa a coluna <b>Hora de Envio</b>. O filtro "Sem movimentação desde o último bipe" usa o horário da última operação e considera apenas pacotes ainda não entregues/devolvidos.<br><b>7.</b> A aba "Editar Base de Dados" salva alterações diretamente na base compartilhada; o botão XLSX exporta todas as tabelas com os filtros atuais.`,
-    regional:'Regional', daterange:'Coletado entre', quick:'Atalhos', rm:'RM', idleDays:'Sem movimentação desde o último bipe (dias)', search:'Buscar pedido',
+      <b>6.</b> Em <b>Filtrar data por</b>, escolha entre <b>Coletado em</b> e <b>Hora de Envio</b>; o período será aplicado exclusivamente ao campo selecionado. O filtro "Sem movimentação desde o último bipe" usa o horário da última operação e considera apenas pacotes ainda não entregues/devolvidos.<br><b>7.</b> A aba "Editar Base de Dados" salva alterações diretamente na base compartilhada; o botão XLSX exporta todas as tabelas com os filtros atuais.`,
+    regional:'Regional', dateSource:'Filtrar data por', dateSourceColeta:'Coletado em', dateSourceEnvio:'Hora de Envio', daterange:'Período', quick:'Atalhos', rm:'RM', idleDays:'Sem movimentação desde o último bipe (dias)', search:'Buscar pedido',
     searchPh:'Número do pedido', onlyproblem:'Somente problemáticos',
     clear:'↻ Sincronizar agora', upload:'⭱ Atualizar base compartilhada', exportXlsx:'⇩ Exportar tabelas XLSX',
     totalLoaded:'Pedidos carregados', lastUpdate:'Última atualização dos dados', filteredCount:'Exibindo (com filtros)',
@@ -508,8 +516,8 @@ const I18N = {
       <b>3.</b> 系统自动识别大区，并将新文件发送到服务器，按订单号合并并更新重复订单。<br>
       <b>4.</b> 数据库为共享模式：任何人上传新文件后，所有访问该网站的人都会看到更新；已打开的页面也会自动检查更新。<br>
       <b>5.</b> 为了在 Railway 重启或重新部署后保留数据，请将 Volume 挂载到 <b>/data</b>。<br>
-      <b>6.</b> "距最后一次操作扫描无更新"筛选使用最近操作时间，并仅筛选尚未签收/退回的包裹。`,
-    regional:'大区', daterange:'采集时间区间', quick:'快捷选项', rm:'区域负责人 (RM)', idleDays:'距最后一次操作扫描无更新（天）', search:'搜索订单号',
+      <b>6.</b> 在<b>按日期字段筛选</b>中可选择<b>揽收时间</b>或<b>发送时间</b>，日期区间只会应用到所选字段。"距最后一次操作扫描无更新"筛选使用最近操作时间，并仅筛选尚未签收/退回的包裹。`,
+    regional:'大区', dateSource:'按日期字段筛选', dateSourceColeta:'揽收时间', dateSourceEnvio:'发送时间', daterange:'日期区间', quick:'快捷选项', rm:'区域负责人 (RM)', idleDays:'距最后一次操作扫描无更新（天）', search:'搜索订单号',
     searchPh:'订单号', onlyproblem:'仅显示问题件',
     clear:'↻ 立即同步', upload:'⭱ 更新共享数据库', exportXlsx:'⇩ 导出表格 XLSX',
     totalLoaded:'已加载订单数', lastUpdate:'数据最后更新时间', filteredCount:'当前筛选显示',
@@ -846,7 +854,7 @@ function parseUploadedMatrix(matrix){
 
     // Mapeamento posicional exigido pela planilha operacional:
     // F = Coletado em | G = Hora de Envio.
-    // O filtro de data usa SOMENTE o valor da coluna G.
+    // O dropdown define qual coluna alimenta o filtro de data: F (Coletado em) ou G (Hora de Envio).
     norm.coleta = values.length > 5 ? values[5] : '';
     norm.envio = values.length > 6 ? values[6] : '';
     return norm;
@@ -884,6 +892,7 @@ function parseFile(file){
 <script>
 /* ============================= FILTER / SORT ============================= */
 function getFilters(){
+  const dateSource = document.getElementById('dateSource').value;
   const from = document.getElementById('dateFrom').value;
   const to = document.getElementById('dateTo').value;
   const rm = document.getElementById('rmFilter').value;
@@ -893,16 +902,16 @@ function getFilters(){
   const maxRaw = document.getElementById('idleDaysMax').value;
   const idleMin = minRaw === '' ? null : Math.max(0, Number(minRaw));
   const idleMax = maxRaw === '' ? null : Math.max(0, Number(maxRaw));
-  return {from, to, rm, search, onlyProblem, idleMin, idleMax};
+  return {dateSource, from, to, rm, search, onlyProblem, idleMin, idleMax};
 }
 
 function filteredRows(){
-  const {from, to, rm, search, onlyProblem, idleMin, idleMax} = getFilters();
+  const {dateSource, from, to, rm, search, onlyProblem, idleMin, idleMax} = getFilters();
   const fromD = from ? new Date(from+'T00:00:00') : null;
   const toD = to ? new Date(to+'T23:59:59') : null;
   return ALL_ROWS.filter(r=>{
     if(currentRegional!=='ALL' && r.reg!==currentRegional) return false;
-    const periodDate = r.envioDate; // o filtro visual continua sendo de data, mas usa exclusivamente a coluna Hora de Envio
+    const periodDate = dateSource === 'envio' ? r.envioDate : r.coletaDate;
     if(fromD && (!periodDate || periodDate < fromD)) return false;
     if(toD && (!periodDate || periodDate > toD)) return false;
     if(rm && r.rm!==rm) return false;
@@ -968,7 +977,13 @@ function applyStaticText(){
   document.getElementById('txt-help-toggle').textContent = t('helpToggle');
   document.getElementById('txt-help-content').innerHTML = t('helpContent');
   document.getElementById('txt-regional').textContent = t('regional');
+  document.getElementById('txt-date-source').textContent = t('dateSource');
   document.getElementById('txt-daterange').textContent = t('daterange');
+  const dateSourceSel = document.getElementById('dateSource');
+  if(dateSourceSel){
+    dateSourceSel.options[0].textContent = t('dateSourceColeta');
+    dateSourceSel.options[1].textContent = t('dateSourceEnvio');
+  }
   document.getElementById('txt-quick').textContent = t('quick');
   document.getElementById('txt-rm').textContent = t('rm');
   document.getElementById('txt-idle-days').textContent = t('idleDays');
@@ -1490,6 +1505,8 @@ async function init(){
   const cutT3 = new Date(now); cutT3.setDate(cutT3.getDate()-3);
   document.getElementById('dateTo').value = `${cutT3.getFullYear()}-${pad(cutT3.getMonth()+1)}-${pad(cutT3.getDate())}`;
 
+  document.getElementById('dateSource').value = 'coleta';
+  document.getElementById('dateSource').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
   document.getElementById('dateFrom').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
   document.getElementById('dateTo').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
   document.getElementById('rmFilter').addEventListener('change', ()=>{pkgPage=1; editPage=1; dataPage=1; render();});
