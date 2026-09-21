@@ -968,14 +968,10 @@ document.getElementById('fileInput').addEventListener('change', async (ev)=>{
   }
 });
 
-function parseUploadedMatrix(matrix){
-  if(!matrix || !matrix.length) return [];
-
-  // Localiza automaticamente a linha de cabeçalho. Isso evita quebrar quando
-  // o XLSX vier com uma linha vazia/título antes da tabela.
+function locateHeaderRow(matrix){
   let headerRowIndex = 0;
   let bestScore = -1;
-  const scanLimit = Math.min(matrix.length, 15);
+  const scanLimit = Math.min(matrix?.length || 0, 15);
   for(let i=0; i<scanLimit; i++){
     const row = matrix[i] || [];
     let score = 0;
@@ -985,29 +981,54 @@ function parseUploadedMatrix(matrix){
     });
     if(score > bestScore){ bestScore = score; headerRowIndex = i; }
   }
+  return headerRowIndex;
+}
 
+function normalizeDateCandidates(candidates, orderHint='DMY'){
+  for(const value of candidates){
+    if(value===undefined || value===null || value==='') continue;
+    const parsed = parseDate(value, orderHint);
+    if(parsed) return dateToStorage(parsed, orderHint);
+  }
+  return '';
+}
+
+function worksheetCellDate(ws, rowNumber, colNumber, orderHint='DMY'){
+  const addr = XLSX.utils.encode_cell({r:rowNumber-1, c:colNumber-1});
+  const cell = ws[addr];
+  if(!cell) return '';
+
+  // Tenta o valor bruto, o texto exibido pelo Excel e o formatador do SheetJS.
+  // Isso cobre células de data reais, seriais do Excel, texto e fórmulas com valor armazenado.
+  const candidates = [];
+  if(cell.v !== undefined && cell.v !== null) candidates.push(cell.v);
+  if(cell.w !== undefined && cell.w !== null) candidates.push(cell.w);
+  try{
+    const formatted = XLSX.utils.format_cell(cell);
+    if(formatted !== undefined && formatted !== null) candidates.push(formatted);
+  }catch(e){}
+
+  return normalizeDateCandidates(candidates, orderHint);
+}
+
+function parseUploadedMatrix(matrix){
+  if(!matrix || !matrix.length) return [];
+
+  const headerRowIndex = locateHeaderRow(matrix);
   const headers = (matrix[headerRowIndex] || []).map(v => (v ?? '').toString());
   const body = matrix.slice(headerRowIndex + 1);
 
-  // Estrutura REAL da planilha operacional:
-  // D (índice 3) = Tempo de coleta / Coletado em
-  // G (índice 6) = Hora de Envio
-  // O cabeçalho é usado como confirmação; se não for reconhecido, D e G
-  // continuam sendo as fontes oficiais para estes dois horários.
-  let coletaIndex = 3;
-  let envioIndex = 6;
+  // Estrutura operacional confirmada:
+  // D (indice 3) = Tempo de coleta / Coletado em
+  // G (indice 6) = Hora de Envio
+  // Para CSV, lemos diretamente essas posicoes.
+  const coletaIndex = 3;
+  const envioIndex = 6;
   let horaOpIndex = -1;
   headers.forEach((h,idx)=>{
     const canon = CANON_MAP[normHeader(h)];
-    if(canon==='coleta') coletaIndex = idx;
-    if(canon==='envio') envioIndex = idx;
     if(canon==='horaop') horaOpIndex = idx;
   });
-
-  // Se um arquivo tiver cabeçalhos estranhos, ainda respeita as posições D/G
-  // informadas para a planilha operacional.
-  if(coletaIndex < 0) coletaIndex = 3;
-  if(envioIndex < 0) envioIndex = 6;
 
   const coletaOrder = detectDateOrder(body.map(values=>values?.[coletaIndex]));
   const envioOrder = detectDateOrder(body.map(values=>values?.[envioIndex]));
@@ -1020,8 +1041,6 @@ function parseUploadedMatrix(matrix){
       if(canon) norm[canon] = values[idx];
     });
 
-    // Datas operacionais: D = coleta e G = envio.
-    // dateToStorage aceita Date do Excel, serial numérico e texto em vários formatos.
     norm.coleta = values.length > coletaIndex ? dateToStorage(values[coletaIndex], coletaOrder) : '';
     norm.envio = values.length > envioIndex ? dateToStorage(values[envioIndex], envioOrder) : '';
     if(horaOpIndex>=0 && values.length>horaOpIndex){
@@ -1029,6 +1048,78 @@ function parseUploadedMatrix(matrix){
     }
     return norm;
   }).filter(r=>r.pedido);
+}
+
+function parseUploadedWorksheet(ws){
+  const matrix = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true, blankrows:false});
+  if(!matrix || !matrix.length) return [];
+
+  const headerRowIndex = locateHeaderRow(matrix);
+  const headers = (matrix[headerRowIndex] || []).map(v => (v ?? '').toString());
+  const body = matrix.slice(headerRowIndex + 1);
+
+  let horaOpIndex = -1;
+  headers.forEach((h,idx)=>{
+    const canon = CANON_MAP[normHeader(h)];
+    if(canon==='horaop') horaOpIndex = idx;
+  });
+
+  // O headerRowIndex e zero-based no array; a primeira linha de dados no Excel e +2.
+  const firstExcelDataRow = headerRowIndex + 2;
+
+  // A ordem fica relevante apenas se as datas estiverem armazenadas como texto ambiguo.
+  const coletaSamples = [];
+  const envioSamples = [];
+  const horaOpSamples = [];
+  for(let i=0; i<body.length; i++){
+    const excelRow = firstExcelDataRow + i;
+    const cellD = ws[`D${excelRow}`];
+    const cellG = ws[`G${excelRow}`];
+    if(cellD){ coletaSamples.push(cellD.v ?? cellD.w ?? ''); }
+    if(cellG){ envioSamples.push(cellG.v ?? cellG.w ?? ''); }
+    if(horaOpIndex>=0){
+      const cell = ws[XLSX.utils.encode_cell({r:excelRow-1,c:horaOpIndex})];
+      if(cell) horaOpSamples.push(cell.v ?? cell.w ?? '');
+    }
+  }
+  const coletaOrder = detectDateOrder(coletaSamples);
+  const envioOrder = detectDateOrder(envioSamples);
+  const horaOpOrder = detectDateOrder(horaOpSamples);
+
+  let envioCellsWithValue = 0;
+  let envioParsed = 0;
+
+  const rows = body.map((values, i)=>{
+    const norm = {};
+    headers.forEach((h, idx)=>{
+      const canon = CANON_MAP[normHeader(h)];
+      if(canon) norm[canon] = values[idx];
+    });
+
+    const excelRow = firstExcelDataRow + i;
+
+    // LEITURA DIRETA DAS COLUNAS FISICAS DO XLSX.
+    // D = Tempo de coleta | G = Hora de Envio.
+    norm.coleta = worksheetCellDate(ws, excelRow, 4, coletaOrder);
+    norm.envio = worksheetCellDate(ws, excelRow, 7, envioOrder);
+
+    const gCell = ws[`G${excelRow}`];
+    if(gCell && ((gCell.v!==undefined && gCell.v!==null && gCell.v!=='') || (gCell.w!==undefined && gCell.w!==null && gCell.w!==''))) envioCellsWithValue++;
+    if(norm.envio) envioParsed++;
+
+    if(horaOpIndex>=0){
+      norm.horaop = worksheetCellDate(ws, excelRow, horaOpIndex+1, horaOpOrder);
+    }
+    return norm;
+  }).filter(r=>r.pedido);
+
+  // Nao deixa um arquivo com a G preenchida ser salvo silenciosamente sem Hora de Envio.
+  if(envioCellsWithValue>0 && envioParsed===0){
+    throw new Error(`A coluna G possui ${envioCellsWithValue} valores, mas nenhum horario de envio foi interpretado. Verifique se o arquivo selecionado e a planilha operacional correta.`);
+  }
+
+  console.info(`[Importacao] Hora de Envio: ${envioParsed}/${envioCellsWithValue} celulas G interpretadas.`);
+  return rows;
 }
 
 function parseUploadedCSV(csvText){
@@ -1047,10 +1138,9 @@ function parseFile(file){
     } else {
       reader.onload = e => {
         try{
-          const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true});
+          const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array', cellDates:true, cellNF:true, cellText:true});
           const ws = wb.Sheets[wb.SheetNames[0]];
-          const matrix = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true, dateNF:'yyyy-mm-dd hh:mm:ss'});
-          resolve(parseUploadedMatrix(matrix));
+          resolve(parseUploadedWorksheet(ws));
         }catch(err){ reject(err); }
       };
       reader.onerror = reject;

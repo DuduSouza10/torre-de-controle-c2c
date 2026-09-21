@@ -93,3 +93,12 @@ O importador aceita datas do Excel em formatos brasileiros, americanos e ISO, co
 ## Correção de datas (D/G)
 
 No arquivo operacional, **D = Tempo de coleta** e **G = Hora de Envio**. O importador lê esses campos como datas/horários e aceita ISO, DD/MM/YYYY, MM/DD/YYYY, datas com hora e serial do Excel. Após atualizar esta versão no Railway, faça um novo upload da planilha original para sobrescrever registros que tenham sido gravados incorretamente por versões anteriores.
+
+## Correcao da Hora de Envio
+
+Na planilha operacional, as datas sao lidas diretamente das colunas fisicas:
+
+- D: Tempo de coleta / Coletado em
+- G: Hora de Envio
+
+Para XLSX, a coluna G e lida celula por celula (G2, G3, ...), considerando o valor bruto, o texto exibido pelo Excel e o valor formatado pelo SheetJS. Se houver valores na coluna G e nenhum deles puder ser interpretado, o upload e interrompido com uma mensagem de erro para evitar salvar a base com Hora de Envio vazia.
