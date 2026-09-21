@@ -85,3 +85,6 @@ O servidor usa lock durante a atualização e gravação atômica do CSV/metadat
 ## Correção MG + SPN
 
 O servidor reconcilia a base persistida do Railway Volume com o snapshot inicial no startup. Isso corrige deployments antigos cujo `shared_dataset.csv` tenha ficado apenas com MG: pedidos ausentes de SPN são adicionados sem sobrescrever pedidos já atualizados no Volume.
+
+### Datas flexíveis
+O importador aceita datas do Excel em formatos brasileiros, americanos e ISO, com ou sem horário. As colunas F (Coletado em), G (Hora de Envio) e Horário da última operação são normalizadas automaticamente para `YYYY-MM-DD HH:MM:SS` antes de serem salvas na base compartilhada. Também são aceitos seriais nativos do Excel.
