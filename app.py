@@ -4,8 +4,10 @@ import json
 import os
 import shutil
 import threading
+import re
+import unicodedata
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -20,6 +22,234 @@ FIELDNAMES = [
     'baseent', 'uf', 'motivo', 'marca', 'transf', 'interceptado',
     'indenizado', 'finalizado'
 ]
+
+
+CANON_MAP = {
+    'rm':'rm','regional':'reg','reg':'reg',
+    'numerodepedidojms':'pedido','numerodopedidojms':'pedido','pedido':'pedido','numeropedido':'pedido',
+    'tempodecoleta':'coleta','coletadoem':'coleta','coleta':'coleta',
+    'estacaodecoleta':'estcol','estcol':'estcol',
+    'horadeenvio':'envio',
+    'tipodaultimaoperacao':'tipo','tipo':'tipo',
+    'operacaomaisrecente':'oprec','oprec':'oprec',
+    'horariodaultimaoperacao':'horaop','horaop':'horaop',
+    'basedeentrega':'baseent','baseent':'baseent',
+    'ufdestino':'uf','uf':'uf',
+    'motivosdaanomalia':'motivo','motivodaanomalia':'motivo','motivo':'motivo',
+    'marcadeassinatura':'marca','marca':'marca',
+    'marcadetransferenciaedevolucao':'transf','transf':'transf',
+    'interceptado':'interceptado','interceptada':'interceptado','interceptacao':'interceptado',
+    'statusdeinterceptacao':'interceptado','statusinterceptacao':'interceptado',
+    'indenizado':'indenizado','indenizada':'indenizado','indenizacao':'indenizado',
+    'statusdeindenizacao':'indenizado','statusindenizacao':'indenizado',
+    'finalizado':'finalizado','finalizada':'finalizado','finalizacao':'finalizado',
+    'statusfinalizacao':'finalizado','statusdefinalizacao':'finalizado',
+}
+
+
+def norm_header(value) -> str:
+    text = '' if value is None else str(value)
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+    return re.sub(r'[^a-z0-9]', '', text.lower())
+
+
+def _strict_dt(y, m, d, hh=0, mm=0, ss=0):
+    try:
+        y, m, d = int(y), int(m), int(d)
+        hh, mm, ss = int(hh or 0), int(mm or 0), int(ss or 0)
+        if y < 100:
+            y += 1900 if y >= 70 else 2000
+        return datetime(y, m, d, hh, mm, ss)
+    except Exception:
+        return None
+
+
+def _detect_date_order(values):
+    dmy = mdy = 0
+    for value in values:
+        if value is None or isinstance(value, (datetime, date, int, float)):
+            continue
+        m = re.search(r'(?<!\d)(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*\d{2,4}', str(value))
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        if a > 12 >= b:
+            dmy += 1
+        elif b > 12 >= a:
+            mdy += 1
+    return 'MDY' if mdy > dmy else 'DMY'
+
+
+def normalize_date_value(value, order='DMY', epoch=None):
+    if value is None or value == '':
+        return ''
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, date):
+        dt = datetime(value.year, value.month, value.day)
+    elif isinstance(value, (int, float)):
+        try:
+            from openpyxl.utils.datetime import from_excel
+            dt = from_excel(value, epoch=epoch) if epoch is not None else from_excel(value)
+            if isinstance(dt, date) and not isinstance(dt, datetime):
+                dt = datetime(dt.year, dt.month, dt.day)
+        except Exception:
+            dt = None
+    else:
+        raw = str(value).strip().strip('"\'')
+        if not raw:
+            return ''
+        # Extrai a data mesmo quando ela vem dentro de um texto/fórmula.
+        iso = re.search(r'(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?', raw)
+        dt = None
+        if iso:
+            dt = _strict_dt(*iso.groups())
+        if dt is None:
+            amb = re.search(r'(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{2,4})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?\s*(AM|PM)?)?', raw, re.I)
+            if amb:
+                a, b, y, hh, mm, ss, ap = amb.groups()
+                a, b, hh = int(a), int(b), int(hh or 0)
+                if ap:
+                    ap = ap.upper()
+                    if ap == 'PM' and hh < 12: hh += 12
+                    if ap == 'AM' and hh == 12: hh = 0
+                if a > 12 and b <= 12:
+                    day, month = a, b
+                elif b > 12 and a <= 12:
+                    month, day = a, b
+                elif order == 'MDY':
+                    month, day = a, b
+                else:
+                    day, month = a, b
+                dt = _strict_dt(y, month, day, hh, mm or 0, ss or 0)
+        if dt is None and re.fullmatch(r'\d{4,6}(?:[.,]\d+)?', raw):
+            try:
+                from openpyxl.utils.datetime import from_excel
+                n = float(raw.replace(',', '.'))
+                if 20000 <= n <= 100000:
+                    dt = from_excel(n, epoch=epoch) if epoch is not None else from_excel(n)
+            except Exception:
+                dt = None
+    if not dt:
+        return ''
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _cell_text(cell, cached_cell=None):
+    values = []
+    if cached_cell is not None and cached_cell.value not in (None, ''):
+        values.append(cached_cell.value)
+    if cell is not None and cell.value not in (None, ''):
+        values.append(cell.value)
+    for value in values:
+        if isinstance(value, (datetime, date)):
+            return value.strftime('%Y-%m-%d %H:%M:%S') if isinstance(value, datetime) else value.isoformat()
+        return str(value).strip()
+    return ''
+
+
+def parse_xlsx_rows(raw_bytes: bytes):
+    from openpyxl import load_workbook
+    from io import BytesIO
+
+    wb_formula = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=False)
+    wb_values = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=True)
+    ws_f = wb_formula.worksheets[0]
+    ws_v = wb_values.worksheets[0]
+
+    # Acha o cabeçalho pela linha física real do Excel.
+    best_row, best_score = 1, -1
+    for row_num in range(1, min(ws_f.max_row, 20) + 1):
+        score = 0
+        for col_num in range(1, min(ws_f.max_column, 80) + 1):
+            text = _cell_text(ws_f.cell(row_num, col_num), ws_v.cell(row_num, col_num))
+            if CANON_MAP.get(norm_header(text)):
+                score += 1
+        if score > best_score:
+            best_row, best_score = row_num, score
+
+    headers = {}
+    horaop_col = None
+    for col_num in range(1, ws_f.max_column + 1):
+        text = _cell_text(ws_f.cell(best_row, col_num), ws_v.cell(best_row, col_num))
+        canon = CANON_MAP.get(norm_header(text))
+        if canon:
+            headers[col_num] = canon
+            if canon == 'horaop':
+                horaop_col = col_num
+
+    coleta_samples = []
+    envio_samples = []
+    horaop_samples = []
+    for row_num in range(best_row + 1, ws_f.max_row + 1):
+        coleta_samples.append(_cell_text(ws_f.cell(row_num, 4), ws_v.cell(row_num, 4)))
+        envio_samples.append(_cell_text(ws_f.cell(row_num, 7), ws_v.cell(row_num, 7)))
+        if horaop_col:
+            horaop_samples.append(_cell_text(ws_f.cell(row_num, horaop_col), ws_v.cell(row_num, horaop_col)))
+    coleta_order = _detect_date_order(coleta_samples)
+    envio_order = _detect_date_order(envio_samples)
+    horaop_order = _detect_date_order(horaop_samples)
+
+    rows = []
+    envio_nonempty = envio_parsed = 0
+    envio_sample = []
+    epoch = wb_values.epoch
+
+    for row_num in range(best_row + 1, ws_f.max_row + 1):
+        row = {key: '' for key in FIELDNAMES}
+        for col_num, canon in headers.items():
+            row[canon] = _cell_text(ws_f.cell(row_num, col_num), ws_v.cell(row_num, col_num))
+
+        # REGRA FIXA DO RELATÓRIO: D = coleta, G = hora de envio.
+        d_raw = _cell_text(ws_f.cell(row_num, 4), ws_v.cell(row_num, 4))
+        g_raw = _cell_text(ws_f.cell(row_num, 7), ws_v.cell(row_num, 7))
+        row['coleta'] = normalize_date_value(ws_v.cell(row_num, 4).value if ws_v.cell(row_num, 4).value not in (None, '') else d_raw, coleta_order, epoch)
+        row['envio'] = normalize_date_value(ws_v.cell(row_num, 7).value if ws_v.cell(row_num, 7).value not in (None, '') else g_raw, envio_order, epoch)
+        if horaop_col:
+            h_raw = _cell_text(ws_f.cell(row_num, horaop_col), ws_v.cell(row_num, horaop_col))
+            h_value = ws_v.cell(row_num, horaop_col).value
+            row['horaop'] = normalize_date_value(h_value if h_value not in (None, '') else h_raw, horaop_order, epoch)
+
+        if g_raw:
+            envio_nonempty += 1
+            if len(envio_sample) < 5:
+                envio_sample.append(f'G{row_num}={g_raw}')
+        if row['envio']:
+            envio_parsed += 1
+
+        pedido = (row.get('pedido') or '').strip()
+        if pedido:
+            row['pedido'] = pedido
+            row['reg'] = (row.get('reg') or '').strip().upper()
+            rows.append(row)
+
+    if envio_nonempty and not envio_parsed:
+        raise ValueError(
+            f'Coluna G contém {envio_nonempty} valores, mas nenhum horário foi interpretado. '
+            f'Amostra: {"; ".join(envio_sample) or "sem amostra"}'
+        )
+    return rows, {
+        'headerRow': best_row,
+        'envioNonEmpty': envio_nonempty,
+        'envioParsed': envio_parsed,
+        'envioSample': envio_sample,
+    }
+
+
+def merge_incoming_rows(incoming, source='upload-xlsx'):
+    incoming = [row for row in incoming if (row.get('pedido') or '').strip()]
+    with DATA_LOCK:
+        current = read_csv_rows(STATE_CSV)
+        by_id = {(row.get('pedido') or '').strip(): row for row in current if (row.get('pedido') or '').strip()}
+        for row in incoming:
+            clean = {key: row.get(key, '') or '' for key in FIELDNAMES}
+            clean['pedido'] = (clean['pedido'] or '').strip()
+            by_id[clean['pedido']] = clean
+        merged = list(by_id.values())
+        write_csv_rows(STATE_CSV, merged)
+        meta = write_meta(len(merged), source=source)
+    return meta, len(incoming)
 
 
 def choose_data_dir() -> Path:
@@ -236,9 +466,6 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != '/api/upload':
-            self.send_json(404, {'error': 'Rota não encontrada.'})
-            return
 
         try:
             content_length = int(self.headers.get('Content-Length', '0'))
@@ -249,6 +476,30 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if content_length > MAX_UPLOAD_BYTES:
             self.send_json(413, {'error': f'Upload excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.'})
+            return
+
+        if path == '/api/import-xlsx':
+            try:
+                raw = self.rfile.read(content_length)
+                rows, diagnostics = parse_xlsx_rows(raw)
+                meta, received = merge_incoming_rows(rows, source='upload-xlsx')
+                self.send_json(200, {
+                    'ok': True,
+                    'received': received,
+                    'count': meta['count'],
+                    'version': meta['version'],
+                    'updatedAt': meta['updatedAt'],
+                    'diagnostics': diagnostics,
+                })
+            except ValueError as exc:
+                self.send_json(400, {'error': str(exc)})
+            except Exception as exc:
+                print(f'Erro ao importar XLSX: {exc}', flush=True)
+                self.send_json(500, {'error': f'Falha ao importar XLSX: {exc}'})
+            return
+
+        if path != '/api/upload':
+            self.send_json(404, {'error': 'Rota não encontrada.'})
             return
 
         try:

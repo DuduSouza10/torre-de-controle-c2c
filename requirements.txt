@@ -1,1 +1,1 @@
-# Sem dependências externas: servidor baseado na biblioteca padrão do Python.
+openpyxl==3.1.5

@@ -102,3 +102,7 @@ Na planilha operacional, as datas sao lidas diretamente das colunas fisicas:
 - G: Hora de Envio
 
 Para XLSX, a coluna G e lida celula por celula (G2, G3, ...), considerando o valor bruto, o texto exibido pelo Excel e o valor formatado pelo SheetJS. Se houver valores na coluna G e nenhum deles puder ser interpretado, o upload e interrompido com uma mensagem de erro para evitar salvar a base com Hora de Envio vazia.
+
+## Correção de Hora de Envio (coluna G)
+
+Arquivos `.xlsx` e `.xlsm` agora são importados diretamente no backend com `openpyxl`. A leitura usa as coordenadas físicas da planilha: **D = Tempo de coleta** e **G = Hora de Envio**. O servidor normaliza datas em formatos ISO, DD/MM/YYYY, MM/DD/YYYY e datas nativas/seriais do Excel. O retorno do upload informa quantas células da coluna G foram encontradas e quantas foram reconhecidas como data.
