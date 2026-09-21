@@ -88,3 +88,8 @@ O servidor reconcilia a base persistida do Railway Volume com o snapshot inicial
 
 ### Datas flexíveis
 O importador aceita datas do Excel em formatos brasileiros, americanos e ISO, com ou sem horário. As colunas F (Coletado em), G (Hora de Envio) e Horário da última operação são normalizadas automaticamente para `YYYY-MM-DD HH:MM:SS` antes de serem salvas na base compartilhada. Também são aceitos seriais nativos do Excel.
+
+
+## Correção de datas (D/G)
+
+No arquivo operacional, **D = Tempo de coleta** e **G = Hora de Envio**. O importador lê esses campos como datas/horários e aceita ISO, DD/MM/YYYY, MM/DD/YYYY, datas com hora e serial do Excel. Após atualizar esta versão no Railway, faça um novo upload da planilha original para sobrescrever registros que tenham sido gravados incorretamente por versões anteriores.

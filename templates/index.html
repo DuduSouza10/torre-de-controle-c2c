@@ -970,15 +970,47 @@ document.getElementById('fileInput').addEventListener('change', async (ev)=>{
 
 function parseUploadedMatrix(matrix){
   if(!matrix || !matrix.length) return [];
-  const headers = (matrix[0] || []).map(v => (v ?? '').toString());
-  const body = matrix.slice(1);
 
-  // A planilha operacional usa F = Coletado em e G = Hora de Envio.
-  // Cada coluna pode vir em padrão brasileiro, americano, ISO ou serial do Excel.
-  const coletaOrder = detectDateOrder(body.map(values=>values?.[5]));
-  const envioOrder = detectDateOrder(body.map(values=>values?.[6]));
+  // Localiza automaticamente a linha de cabeçalho. Isso evita quebrar quando
+  // o XLSX vier com uma linha vazia/título antes da tabela.
+  let headerRowIndex = 0;
+  let bestScore = -1;
+  const scanLimit = Math.min(matrix.length, 15);
+  for(let i=0; i<scanLimit; i++){
+    const row = matrix[i] || [];
+    let score = 0;
+    row.forEach(v=>{
+      const canon = CANON_MAP[normHeader(v ?? '')];
+      if(canon) score++;
+    });
+    if(score > bestScore){ bestScore = score; headerRowIndex = i; }
+  }
+
+  const headers = (matrix[headerRowIndex] || []).map(v => (v ?? '').toString());
+  const body = matrix.slice(headerRowIndex + 1);
+
+  // Estrutura REAL da planilha operacional:
+  // D (índice 3) = Tempo de coleta / Coletado em
+  // G (índice 6) = Hora de Envio
+  // O cabeçalho é usado como confirmação; se não for reconhecido, D e G
+  // continuam sendo as fontes oficiais para estes dois horários.
+  let coletaIndex = 3;
+  let envioIndex = 6;
   let horaOpIndex = -1;
-  headers.forEach((h,idx)=>{ if(CANON_MAP[normHeader(h)]==='horaop') horaOpIndex=idx; });
+  headers.forEach((h,idx)=>{
+    const canon = CANON_MAP[normHeader(h)];
+    if(canon==='coleta') coletaIndex = idx;
+    if(canon==='envio') envioIndex = idx;
+    if(canon==='horaop') horaOpIndex = idx;
+  });
+
+  // Se um arquivo tiver cabeçalhos estranhos, ainda respeita as posições D/G
+  // informadas para a planilha operacional.
+  if(coletaIndex < 0) coletaIndex = 3;
+  if(envioIndex < 0) envioIndex = 6;
+
+  const coletaOrder = detectDateOrder(body.map(values=>values?.[coletaIndex]));
+  const envioOrder = detectDateOrder(body.map(values=>values?.[envioIndex]));
   const horaOpOrder = horaOpIndex>=0 ? detectDateOrder(body.map(values=>values?.[horaOpIndex])) : 'DMY';
 
   return body.map(values=>{
@@ -988,9 +1020,10 @@ function parseUploadedMatrix(matrix){
       if(canon) norm[canon] = values[idx];
     });
 
-    // Posição fixa da operação: F e G, independentemente do texto do cabeçalho.
-    norm.coleta = values.length > 5 ? dateToStorage(values[5], coletaOrder) : '';
-    norm.envio = values.length > 6 ? dateToStorage(values[6], envioOrder) : '';
+    // Datas operacionais: D = coleta e G = envio.
+    // dateToStorage aceita Date do Excel, serial numérico e texto em vários formatos.
+    norm.coleta = values.length > coletaIndex ? dateToStorage(values[coletaIndex], coletaOrder) : '';
+    norm.envio = values.length > envioIndex ? dateToStorage(values[envioIndex], envioOrder) : '';
     if(horaOpIndex>=0 && values.length>horaOpIndex){
       norm.horaop = dateToStorage(values[horaOpIndex], horaOpOrder);
     }
