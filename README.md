@@ -106,3 +106,7 @@ Para XLSX, a coluna G e lida celula por celula (G2, G3, ...), considerando o val
 ## Correção de Hora de Envio (coluna G)
 
 Arquivos `.xlsx` e `.xlsm` agora são importados diretamente no backend com `openpyxl`. A leitura usa as coordenadas físicas da planilha: **D = Tempo de coleta** e **G = Hora de Envio**. O servidor normaliza datas em formatos ISO, DD/MM/YYYY, MM/DD/YYYY e datas nativas/seriais do Excel. O retorno do upload informa quantas células da coluna G foram encontradas e quantas foram reconhecidas como data.
+
+## Correção do erro `No module named 'openpyxl'`
+
+Esta versão força o Railway a usar o `Dockerfile` e instala `openpyxl==3.1.5` durante o build. O projeto também inclui um parser XLSX de contingência usando apenas a biblioteca padrão do Python: se `openpyxl` não estiver disponível por qualquer motivo, a importação continua funcionando e mantém a regra física **D = Tempo de coleta** e **G = Hora de Envio**.

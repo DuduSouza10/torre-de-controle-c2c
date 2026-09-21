@@ -7,7 +7,9 @@ import threading
 import re
 import unicodedata
 import time
-from datetime import date, datetime, timezone
+import zipfile
+import xml.etree.ElementTree as ET
+from datetime import date, datetime, timezone, timedelta
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -81,6 +83,26 @@ def _detect_date_order(values):
     return 'MDY' if mdy > dmy else 'DMY'
 
 
+def _excel_serial_to_datetime(value, epoch=None):
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    base = datetime(1899, 12, 30)
+    if epoch is not None:
+        try:
+            if isinstance(epoch, (datetime, date)) and epoch.year == 1904:
+                base = datetime(1904, 1, 1)
+            elif str(epoch).startswith('1904'):
+                base = datetime(1904, 1, 1)
+        except Exception:
+            pass
+    try:
+        return base + timedelta(days=number)
+    except Exception:
+        return None
+
+
 def normalize_date_value(value, order='DMY', epoch=None):
     if value is None or value == '':
         return ''
@@ -89,13 +111,7 @@ def normalize_date_value(value, order='DMY', epoch=None):
     elif isinstance(value, date):
         dt = datetime(value.year, value.month, value.day)
     elif isinstance(value, (int, float)):
-        try:
-            from openpyxl.utils.datetime import from_excel
-            dt = from_excel(value, epoch=epoch) if epoch is not None else from_excel(value)
-            if isinstance(dt, date) and not isinstance(dt, datetime):
-                dt = datetime(dt.year, dt.month, dt.day)
-        except Exception:
-            dt = None
+        dt = _excel_serial_to_datetime(value, epoch)
     else:
         raw = str(value).strip().strip('"\'')
         if not raw:
@@ -125,10 +141,9 @@ def normalize_date_value(value, order='DMY', epoch=None):
                 dt = _strict_dt(y, month, day, hh, mm or 0, ss or 0)
         if dt is None and re.fullmatch(r'\d{4,6}(?:[.,]\d+)?', raw):
             try:
-                from openpyxl.utils.datetime import from_excel
                 n = float(raw.replace(',', '.'))
                 if 20000 <= n <= 100000:
-                    dt = from_excel(n, epoch=epoch) if epoch is not None else from_excel(n)
+                    dt = _excel_serial_to_datetime(n, epoch)
             except Exception:
                 dt = None
     if not dt:
@@ -149,9 +164,180 @@ def _cell_text(cell, cached_cell=None):
     return ''
 
 
+
+def _xlsx_col_number(cell_ref):
+    letters = ''.join(ch for ch in str(cell_ref) if ch.isalpha()).upper()
+    number = 0
+    for ch in letters:
+        number = number * 26 + (ord(ch) - 64)
+    return number
+
+
+def _xlsx_first_sheet_path(zf):
+    ns_main = {
+        'm': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    }
+    wb = ET.fromstring(zf.read('xl/workbook.xml'))
+    first_sheet = wb.find('m:sheets/m:sheet', ns_main)
+    if first_sheet is None:
+        raise ValueError('XLSX sem planilha disponível.')
+    rel_id = first_sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+    rels = ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
+    target = None
+    for rel in rels:
+        if rel.attrib.get('Id') == rel_id:
+            target = rel.attrib.get('Target')
+            break
+    if not target:
+        return 'xl/worksheets/sheet1.xml'
+    target = target.lstrip('/')
+    if target.startswith('xl/'):
+        return target
+    return 'xl/' + target
+
+
+def _xlsx_shared_strings(zf):
+    path = 'xl/sharedStrings.xml'
+    if path not in zf.namelist():
+        return []
+    root = ET.fromstring(zf.read(path))
+    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    out = []
+    for si in root.findall('m:si', ns):
+        parts = [node.text or '' for node in si.findall('.//m:t', ns)]
+        out.append(''.join(parts))
+    return out
+
+
+def _xlsx_cell_value(cell, shared):
+    ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    typ = cell.attrib.get('t', '')
+    if typ == 'inlineStr':
+        return ''.join((n.text or '') for n in cell.findall('.//m:t', ns))
+    v = cell.find('m:v', ns)
+    if v is None or v.text is None:
+        return ''
+    raw = v.text
+    if typ == 's':
+        try:
+            return shared[int(raw)]
+        except Exception:
+            return raw
+    if typ in ('str', 'd', 'e'):
+        return raw
+    if typ == 'b':
+        return '1' if raw == '1' else '0'
+    try:
+        number = float(raw)
+        return int(number) if number.is_integer() else number
+    except Exception:
+        return raw
+
+
+def parse_xlsx_rows_stdlib(raw_bytes: bytes):
+    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+        shared = _xlsx_shared_strings(zf)
+        sheet_path = _xlsx_first_sheet_path(zf)
+        sheet = ET.fromstring(zf.read(sheet_path))
+        ns = {'m': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+        rows_by_num = {}
+        for row_el in sheet.findall('.//m:sheetData/m:row', ns):
+            row_num = int(row_el.attrib.get('r') or (len(rows_by_num) + 1))
+            vals = {}
+            for cell in row_el.findall('m:c', ns):
+                col_num = _xlsx_col_number(cell.attrib.get('r', ''))
+                if col_num:
+                    vals[col_num] = _xlsx_cell_value(cell, shared)
+            rows_by_num[row_num] = vals
+
+        if not rows_by_num:
+            raise ValueError('XLSX sem linhas de dados.')
+
+        best_row, best_score = 1, -1
+        for row_num in sorted(rows_by_num)[:20]:
+            vals = rows_by_num[row_num]
+            score = sum(1 for value in vals.values() if CANON_MAP.get(norm_header(value)))
+            if score > best_score:
+                best_row, best_score = row_num, score
+
+        headers = {}
+        horaop_col = None
+        for col_num, value in rows_by_num.get(best_row, {}).items():
+            canon = CANON_MAP.get(norm_header(value))
+            if canon:
+                headers[col_num] = canon
+                if canon == 'horaop':
+                    horaop_col = col_num
+
+        epoch = datetime(1899, 12, 30)
+        try:
+            wb = ET.fromstring(zf.read('xl/workbook.xml'))
+            wbpr = wb.find('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}workbookPr')
+            if wbpr is not None and str(wbpr.attrib.get('date1904', '')).lower() in ('1', 'true'):
+                epoch = datetime(1904, 1, 1)
+        except Exception:
+            pass
+
+        data_row_nums = [n for n in sorted(rows_by_num) if n > best_row]
+        coleta_samples = [rows_by_num[n].get(4, '') for n in data_row_nums]
+        envio_samples = [rows_by_num[n].get(7, '') for n in data_row_nums]
+        horaop_samples = [rows_by_num[n].get(horaop_col, '') for n in data_row_nums] if horaop_col else []
+        coleta_order = _detect_date_order(coleta_samples)
+        envio_order = _detect_date_order(envio_samples)
+        horaop_order = _detect_date_order(horaop_samples)
+
+        rows = []
+        envio_nonempty = 0
+        envio_parsed = 0
+        envio_sample = []
+        for row_num in data_row_nums:
+            vals = rows_by_num[row_num]
+            row = {key: '' for key in FIELDNAMES}
+            for col_num, canon in headers.items():
+                value = vals.get(col_num, '')
+                row[canon] = '' if value is None else str(value).strip()
+
+            # Physical report columns: D = collection time, G = dispatch time.
+            d_raw = vals.get(4, '')
+            g_raw = vals.get(7, '')
+            row['coleta'] = normalize_date_value(d_raw, coleta_order, epoch)
+            row['envio'] = normalize_date_value(g_raw, envio_order, epoch)
+            if horaop_col:
+                row['horaop'] = normalize_date_value(vals.get(horaop_col, ''), horaop_order, epoch)
+
+            if g_raw not in ('', None):
+                envio_nonempty += 1
+                if len(envio_sample) < 5:
+                    envio_sample.append(f'G{row_num}={g_raw}')
+            if row['envio']:
+                envio_parsed += 1
+
+            pedido = (row.get('pedido') or '').strip()
+            if pedido:
+                row['pedido'] = pedido
+                row['reg'] = (row.get('reg') or '').strip().upper()
+                rows.append(row)
+
+        if envio_nonempty and not envio_parsed:
+            raise ValueError(
+                f'Coluna G contém {envio_nonempty} valores, mas nenhum horário foi interpretado. '
+                f'Amostra: {"; ".join(envio_sample) or "sem amostra"}'
+            )
+        return rows, {
+            'headerRow': best_row,
+            'envioNonEmpty': envio_nonempty,
+            'envioParsed': envio_parsed,
+            'envioSample': envio_sample,
+            'parser': 'stdlib-fallback',
+        }
+
 def parse_xlsx_rows(raw_bytes: bytes):
-    from openpyxl import load_workbook
-    from io import BytesIO
+    try:
+        from openpyxl import load_workbook
+        from io import BytesIO
+    except ModuleNotFoundError:
+        return parse_xlsx_rows_stdlib(raw_bytes)
 
     wb_formula = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=False)
     wb_values = load_workbook(BytesIO(raw_bytes), read_only=True, data_only=True)
@@ -234,6 +420,7 @@ def parse_xlsx_rows(raw_bytes: bytes):
         'envioNonEmpty': envio_nonempty,
         'envioParsed': envio_parsed,
         'envioSample': envio_sample,
+        'parser': 'openpyxl',
     }
 
 
